@@ -6,8 +6,8 @@ Traefik plugin to handle traffic coming from Cloudflare.
 
 ## Features
 
-* Only allow traffic originating from Cloudflare IP v4 and v6 
-* Custom CIDRs list can be added to allow request not from CloudFlare 
+* Only allow traffic originating from Cloudflare IP v4 and v6
+* Custom CIDRs list can be added to allow request not from CloudFlare
 * Refresh Clouflare CIDRs from Cloudflare API url https://api.cloudflare.com/client/v4/ips
 * Handle `X-Forwarded-For` original header to allow Cloudflare request from a trusted revers proxy behind Traefik
 * Rewrite requests `X-Forwarded-For` header with the user IP provided by `CF-Connecting-IP`
