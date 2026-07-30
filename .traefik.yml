@@ -1,9 +1,12 @@
-displayName: Cloudflare
-summary: Handle traffic coming from Cloudflare.
+displayName: Smart Fordarding (Cloudflare and Local proxies)
+summary: Handle traffic coming from Cloudflare and local proxies.
 type: middleware
-import: github.com/agence-gaya/traefik-plugin-cloudflare
+import: github.com/markfrommn/traefik-plugin-cloudflare
+
+summary: Support Cloudflare IPs (fetched dynamically) and local trustedIPs as trusted proxies with intelligenct fallback fro CF-Cloudflare-IP, X-Real-IP and X-Fordarded-For  as middleware.
 
 testData:
-  trustedCIDRs: []
+  trustedCIDRs: [ "172.22.1.1", "192.156.1.2" ]
   refreshInterval: 24h
   overwriteRequestHeader: true
+  useBoth: true

@@ -6,6 +6,8 @@ Traefik plugin to handle traffic coming from Cloudflare.
 
 ## Features
 
+### Original module from agence-gaya
+
 * Only allow traffic originating from Cloudflare IP v4 and v6
 * Custom CIDRs list can be added to allow request not from CloudFlare
 * Refresh Clouflare CIDRs from Cloudflare API url https://api.cloudflare.com/client/v4/ips
@@ -14,6 +16,15 @@ Traefik plugin to handle traffic coming from Cloudflare.
 * Rewrite requests `X-Forwarded-Proto` header with the scheme provided by `CF-Visitor`
 * Rewrite requests `X-Real-IP` header with the user IP provided by `CF-Connecting-IP`
 * Rewrite RemoteAdress to permit Traefik ipwhitelist middleware to work on IP provided by `CF-Connecting-IP`
+
+### As enhanced by markfrommn
+
+* Derive real Client IP from (in order):
+- `CF-Connecting-IP`
+- `X-Real-IP`
+- `X-Forwarded-For` (1st token which is the first client IP)**
+* Allow mixing both Cloudflare IPs from API with user supplied IPs.
+- Useful for mixing and matching with ACLs and/or private trustedIPs.
 
 ## Configuration
 
@@ -26,6 +37,7 @@ Traefik plugin to handle traffic coming from Cloudflare.
 |    `refreshInterval`     | `time.Duration` |  `24h`   |         When `trustedCIDRs` is empty, Cloudflare's CIDRs will be refreshed after this duration. Using a value of 0 seconds disables the refresh.          |
 | `overwriteRequestHeader` | `bool`          |  `true`  | When `true`, the request's header are rewrite. When `false` any header or traefik RemoteAddress are modified, filter only the request from Cloudflare IP. |
 | `appendXForwardedFor`    | `bool`          |  `false` | Work only when `overwriteRequestHeader` `true`, When `true` prepend Cloudflare IP to XForwardedFor instead of replace XForwardedFor first value.  |
+|         `useBoth`        | `bool`          | `false`  | Use both trustedCIDRs and Cloudflare IPs as trusted including refresh if refreshInterval is set.                                                                                           |
 |         `debug`          | `bool`          | `false`  |                                                           Output debug message in traefik log.                                                            |
 
 ### Traefik static configuration
@@ -59,11 +71,11 @@ http:
         - cloudflare
 ```
 
-[Tag]: https://github.com/agence-gaya/traefik-plugin-cloudflare/tags
-[Tag Badge]: https://img.shields.io/github/v/tag/agence-gaya/traefik-plugin-cloudflare?sort=semver
+[Tag]: https://github.com/markfrommn/traefik-plugin-cloudflare/tags
+[Tag Badge]: https://img.shields.io/github/v/tag/markfrommn/traefik-plugin-cloudflare?sort=semver
 [Go Version]: /go.mod
 [Go Version Badge]: https://img.shields.io/github/go-mod/go-version/agence-gaya/traefik-plugin-cloudflare
-[Build]: https://github.com/agence-gaya/traefik-plugin-cloudflare/actions/workflows/test.yml
+[Build]: https://github.com/markfrommn/traefik-plugin-cloudflare/actions/workflows/test.yml
 [Build Badge]: https://img.shields.io/github/actions/workflow/status/agence-gaya/traefik-plugin-cloudflare/test.yml
 [Go Report Card]: https://goreportcard.com/report/github.com/agence-gaya/traefik-plugin-cloudflare
 [Go Report Card Badge]: https://goreportcard.com/badge/github.com/agence-gaya/traefik-plugin-cloudflare

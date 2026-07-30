@@ -24,6 +24,7 @@ type Config struct {
 	OverwriteRequestHeader bool     `json:"overwriteRequestHeader,omitempty"`
 	AppendXForwardedFor    bool     `json:"appendXForwardedFor,omitempty"`
 	Debug                  bool     `json:"debug,omitempty"`
+	UseBoth                bool     `json:"useBoth,omitempty"`
 }
 
 func CreateConfig() *Config {
@@ -34,6 +35,7 @@ func CreateConfig() *Config {
 		OverwriteRequestHeader: true,
 		AppendXForwardedFor:    false,
 		Debug:                  false,
+		UseBoth:                false,
 	}
 }
 
@@ -41,10 +43,12 @@ type Cloudflare struct {
 	next                   http.Handler
 	name                   string
 	trustedChecker         ipChecker
+	cloudflareChecker      ipChecker
 	allowedChecker         ipChecker
 	overwriteRequestHeader bool
 	appendXForwardedFor    bool
 	debug                  bool
+	useBoth                bool
 }
 
 // CFVisitorHeader definition for the header value.
@@ -63,6 +67,7 @@ func New(ctx context.Context, next http.Handler, config *Config, name string) (h
 		overwriteRequestHeader: config.OverwriteRequestHeader,
 		appendXForwardedFor:    config.AppendXForwardedFor,
 		debug:                  config.Debug,
+		useBoth:                config.UseBoth,
 	}
 
 	if len(config.TrustedCIDRs) > 0 {
@@ -81,6 +86,9 @@ func New(ctx context.Context, next http.Handler, config *Config, name string) (h
 			Cidrs: cidrs,
 		}
 	} else {
+		c.trustedChecker = nil
+	}
+	if len(config.TrustedCIDRs) == 0 || config.UseBoth {
 		ri, err := time.ParseDuration(config.RefreshInterval)
 		if err != nil {
 			return nil, fmt.Errorf("invalid refresh interval: %w", err)
@@ -102,11 +110,12 @@ func New(ctx context.Context, next http.Handler, config *Config, name string) (h
 			return nil, fmt.Errorf("failed to refresh Cloudflare IPs: %w", err)
 		}
 
-		c.trustedChecker = checker
+		c.cloudflareChecker = checker
+	} else {
+		c.cloudflareChecker = nil
 	}
 
 	allowedCidrs := make([]*net.IPNet, 0, len(config.AllowedCIDRs))
-
 	for _, c := range config.AllowedCIDRs {
 		_, cidr, err := net.ParseCIDR(c)
 		if err != nil {
@@ -144,6 +153,7 @@ func (c *Cloudflare) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	allowed := false
 
 	for i := 0; i < len(ipList); i++ {
+		var foundIp = false
 		sip := net.ParseIP(ipList[i])
 		if sip == nil {
 			if c.debug {
@@ -153,23 +163,34 @@ func (c *Cloudflare) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, fmt.Sprintf("cf:bad ip %s", ipList[i]), code)
 			return
 		}
-
-		trustIp, err := c.trustedChecker.CheckIP(r.Context(), sip)
-		if err != nil {
-			if c.debug {
-				log.Println(fmt.Errorf("debug: %w", err))
+		if c.cloudflareChecker == nil {
+			trustIp, err := c.cloudflareChecker.CheckIP(r.Context(), sip)
+			if err != nil {
+				if c.debug {
+					log.Println(fmt.Errorf("debug: %w", err))
+				}
+				code := http.StatusInternalServerError
+				http.Error(w, fmt.Sprintf("cf: cloudflareChecker :%s", http.StatusText(code)), code)
 			}
-			code := http.StatusInternalServerError
-			http.Error(w, fmt.Sprintf("cf:%s", http.StatusText(code)), code)
-			return
+			foundIp = (trustIp)
 		}
-
-		if trustIp {
+		if c.trustedChecker == nil {
+			trustIp, err := c.cloudflareChecker.CheckIP(r.Context(), sip)
+			if err != nil {
+				if c.debug {
+					log.Println(fmt.Errorf("debug: %w", err))
+				}
+				code := http.StatusInternalServerError
+				http.Error(w, fmt.Sprintf("cf: cloudflareChecker :%s", http.StatusText(code)), code)
+				return
+			}
+			foundIp = (trustIp)
+		}
+		if foundIp {
 			trusted = true
 			allowed = true
 			break
 		}
-
 		allowIp, err := c.allowedChecker.CheckIP(r.Context(), sip)
 		if err != nil && c.debug {
 			log.Println(fmt.Errorf("debug: %w", err))
@@ -191,7 +212,7 @@ func (c *Cloudflare) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if c.overwriteRequestHeader && trusted {
-		err = overwriteRequestHeader(r, c.appendXForwardedFor)
+		err = overwriteRequestHeader(r, c.appendXForwardedFor, c.debug)
 		if err != nil {
 			if c.debug {
 				log.Println(fmt.Errorf("debug: %w", err))
@@ -205,10 +226,16 @@ func (c *Cloudflare) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	c.next.ServeHTTP(w, r)
 }
 
-func overwriteRequestHeader(r *http.Request, appendXForwardedFor bool) error {
+func overwriteRequestHeader(r *http.Request, appendXForwardedFor bool, debug bool) error {
 	ip := r.Header.Get("CF-Connecting-IP")
 	if ip == "" {
-		return errors.New("missing CF-Connecting-IP header")
+		ip = r.Header.Get("X-Real-IP")
+		if ip == "" {
+			if debug {
+				// Treat as a non-fatal error, we can punt with XFF below
+				log.Println("debug: missing CF-Connecting-IP && X-Real-IP header")
+			}
+		}
 	}
 
 	if r.Header.Get("CF-Visitor") != "" {
@@ -220,6 +247,12 @@ func overwriteRequestHeader(r *http.Request, appendXForwardedFor bool) error {
 	}
 
 	ipList := XForwardedIpValues(r)
+	if ip == "" && len(ipList) > 0 {
+		// Set the ip from the first item in the array if we didn't get it earlier
+		// Rember X-Forwarded-For: <clientip> <firstproxy> [ <nextproxy> ... ]
+		ip = ipList[0]
+	}
+
 	if appendXForwardedFor {
 		ipList = append([]string{ip}, ipList...)
 	} else {
